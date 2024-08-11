@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of_platform.h>
@@ -888,7 +887,7 @@ static int bolero_ssr_enable(struct device *dev, void *data)
 				priv->component,
 				BOLERO_MACRO_EVT_CLK_RESET, 0x0);
 	}
-	TRACE_PRINTK("%s: clk count reset\n", __func__);
+	trace_printk("%s: clk count reset\n", __func__);
 
 	if (priv->rsc_clk_cb)
 		priv->rsc_clk_cb(priv->clk_dev, BOLERO_MACRO_EVT_SSR_GFMUX_UP);
@@ -911,7 +910,7 @@ static int bolero_ssr_enable(struct device *dev, void *data)
 	/* Add a 100usec sleep to ensure last register write is done */
 	usleep_range(100,110);
 	bolero_clk_rsc_enable_all_clocks(priv->clk_dev, false);
-	TRACE_PRINTK("%s: regcache_sync done\n", __func__);
+	trace_printk("%s: regcache_sync done\n", __func__);
 	/* call ssr event for supported macros */
 	for (macro_idx = START_MACRO; macro_idx < MAX_MACRO; macro_idx++) {
 		if (!priv->macro_params[macro_idx].event_handler)
@@ -920,7 +919,7 @@ static int bolero_ssr_enable(struct device *dev, void *data)
 			priv->component,
 			BOLERO_MACRO_EVT_SSR_UP, 0x0);
 	}
-	TRACE_PRINTK("%s: SSR up events processed by all macros\n", __func__);
+	trace_printk("%s: SSR up events processed by all macros\n", __func__);
 	bolero_cdc_notifier_call(priv, BOLERO_SLV_EVT_SSR_UP);
 	return 0;
 }
@@ -1455,7 +1454,7 @@ int bolero_runtime_resume(struct device *dev)
 	}
 
 	if (priv->core_hw_vote_count == 0) {
-		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_core_hw_vote, dev);
+		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_core_hw_vote);
 		if (ret < 0) {
 			dev_err(dev, "%s:lpass core hw enable failed\n",
 				__func__);
@@ -1463,7 +1462,7 @@ int bolero_runtime_resume(struct device *dev)
 		}
 	}
 	priv->core_hw_vote_count++;
-	TRACE_PRINTK("%s: hw vote count %d\n",
+	trace_printk("%s: hw vote count %d\n",
 		__func__, priv->core_hw_vote_count);
 
 audio_vote:
@@ -1473,7 +1472,7 @@ audio_vote:
 	}
 
 	if (priv->core_audio_vote_count == 0) {
-		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_audio_hw_vote, dev);
+		ret = digital_cdc_rsc_mgr_hw_vote_enable(priv->lpass_audio_hw_vote);
 		if (ret < 0) {
 			if (__ratelimit(&rtl))
 				dev_err(dev, "%s:lpass audio hw enable failed\n",
@@ -1482,7 +1481,7 @@ audio_vote:
 		}
 	}
 	priv->core_audio_vote_count++;
-	TRACE_PRINTK("%s: audio vote count %d\n",
+	trace_printk("%s: audio vote count %d\n",
 		__func__, priv->core_audio_vote_count);
 
 done:
@@ -1500,27 +1499,27 @@ int bolero_runtime_suspend(struct device *dev)
 	if (priv->lpass_core_hw_vote != NULL) {
 		if (--priv->core_hw_vote_count == 0)
 			digital_cdc_rsc_mgr_hw_vote_disable(
-					priv->lpass_core_hw_vote, dev);
+					priv->lpass_core_hw_vote);
 		if (priv->core_hw_vote_count < 0)
 			priv->core_hw_vote_count = 0;
 	} else {
 		dev_dbg(dev, "%s: Invalid lpass core hw node\n",
 			__func__);
 	}
-	TRACE_PRINTK("%s: hw vote count %d\n",
+	trace_printk("%s: hw vote count %d\n",
 		__func__, priv->core_hw_vote_count);
 
 	if (priv->lpass_audio_hw_vote != NULL) {
 		if (--priv->core_audio_vote_count == 0)
 			digital_cdc_rsc_mgr_hw_vote_disable(
-					priv->lpass_audio_hw_vote, dev);
+					priv->lpass_audio_hw_vote);
 		if (priv->core_audio_vote_count < 0)
 			priv->core_audio_vote_count = 0;
 	} else {
 		dev_dbg(dev, "%s: Invalid lpass audio hw node\n",
 			__func__);
 	}
-	TRACE_PRINTK("%s: audio vote count %d\n",
+	trace_printk("%s: audio vote count %d\n",
 		__func__, priv->core_audio_vote_count);
 
 	mutex_unlock(&priv->vote_lock);

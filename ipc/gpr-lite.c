@@ -1,6 +1,5 @@
 /* Copyright (c) 2011-2017, 2019-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2018, Linaro Limited
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -65,7 +64,7 @@ void gpr_subsys_notif_register(char *client_name, int domain,
 
 	ret = audio_notifier_register(client_name, domain, nb);
 	if (ret < 0)
-		dev_err_ratelimited(gpr_priv->dev, "%s: Audio notifier register failed for domain %d ret = %d\n",
+		dev_err(gpr_priv->dev, "%s: Audio notifier register failed for domain %d ret = %d\n",
 			__func__, domain, ret);
 }
 
@@ -75,7 +74,7 @@ void gpr_subsys_notif_deregister(char *client_name)
 
 	ret = audio_notifier_deregister(client_name);
 	if (ret < 0)
-		dev_err_ratelimited(gpr_priv->dev, "%s: Audio notifier de-register failed for client %s\n",
+		dev_err(gpr_priv->dev, "%s: Audio notifier de-register failed for client %s\n",
 			__func__, client_name);
 }
 
@@ -95,40 +94,30 @@ int gpr_send_pkt(struct gpr_device *adev, struct gpr_pkt *pkt)
 	uint32_t pkt_size;
 	int ret;
 
-	if (gpr_get_q6_state() == GPR_SUBSYS_DOWN) {
-		pr_err_ratelimited("%s: q6 state is down\n", __func__, adev);
-		return -EINVAL;
-	}
-
 	if(!adev)
 	{
-		pr_err_ratelimited("%s: enter pointer adev[%pK] \n", __func__, adev);
+		pr_err("%s: enter pointer adev[%pK] \n", __func__, adev);
 		return -EINVAL;
 	}
 
 	if(!(adev->dev.parent))
 	{
-		pr_err_ratelimited("%s: enter pointer adev->dev.parent[%pK] \n",
+		pr_err("%s: enter pointer adev->dev.parent[%pK] \n",
 			__func__, adev->dev.parent);
 		return -EINVAL;
 	}
 
 	gpr = dev_get_drvdata(adev->dev.parent);
 
-	if (!gpr) {
-		pr_err_ratelimited("%s: Failed to get gpr dev pointer : gpr[%pK] \n",
-			__func__, gpr);
-		return -EINVAL;
-	}
-
 	if ((adev->domain_id == GPR_DOMAIN_ADSP) &&
 	    (gpr_get_q6_state() != GPR_SUBSYS_LOADED)) {
-		dev_err_ratelimited(gpr->dev, "%s:  Still Dsp is not Up\n", __func__);
+		dev_err(gpr->dev,"%s: domain_id[%d], Still Dsp is not Up\n",
+			__func__, adev->domain_id);
 		return -ENETRESET;
-	} else if ((adev->domain_id == GPR_DOMAIN_MODEM) &&
+		} else if ((adev->domain_id == GPR_DOMAIN_MODEM) &&
 		   (gpr_get_modem_state() == GPR_SUBSYS_DOWN)) {
-		dev_err_ratelimited(gpr->dev, "%s:  Still Modem is not Up\n",
-			__func__);
+		dev_err(gpr->dev, "%s: domain_id[%d], Still Modem is not Up\n",
+			__func__, adev->domain_id );
 		return -ENETRESET;
 	}
 
@@ -142,6 +131,7 @@ int gpr_send_pkt(struct gpr_device *adev, struct gpr_pkt *pkt)
 		adev->svc_id, __func__, pkt_size);
 	ret = rpmsg_trysend(gpr->ch, pkt, pkt_size);
 	spin_unlock_irqrestore(&adev->lock, flags);
+
 	return ret ? ret : pkt_size;
 }
 EXPORT_SYMBOL_GPL(gpr_send_pkt);
@@ -195,14 +185,14 @@ static const struct snd_event_ops gpr_ssr_ops = {
 
 static void gpr_adsp_down(unsigned long opcode)
 {
-	dev_info_ratelimited(gpr_priv->dev, "%s: Q6 is Down\n", __func__);
+	dev_info(gpr_priv->dev,"%s: Q6 is Down\n", __func__);
 	gpr_set_q6_state(GPR_SUBSYS_DOWN);
 	snd_event_notify(gpr_priv->dev, SND_EVENT_DOWN);
 }
 
 static void gpr_adsp_up(void)
 {
-	dev_info_ratelimited(gpr_priv->dev, "%s: Q6 is Up\n", __func__);
+	dev_info(gpr_priv->dev,"%s: Q6 is Up\n", __func__);
 	gpr_set_q6_state(GPR_SUBSYS_LOADED);
 	snd_event_notify(gpr_priv->dev, SND_EVENT_UP);
 }
@@ -213,7 +203,7 @@ static int gpr_notifier_service_cb(struct notifier_block *this,
 	struct audio_notifier_cb_data *cb_data = data;
 
 	if (cb_data == NULL) {
-		dev_err_ratelimited(gpr_priv->dev, "%s: Callback data is NULL!\n", __func__);
+		dev_err(gpr_priv->dev,"%s: Callback data is NULL!\n", __func__);
 		goto done;
 	}
 
@@ -286,7 +276,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 	//uint32_t opcode_type;
 
 	if (len <= GPR_HDR_SIZE) {
-		dev_err_ratelimited(gpr->dev, "GPR: Improper gpr pkt received:%p %d\n",
+		dev_err(gpr->dev, "GPR: Improper gpr pkt received:%p %d\n",
 			buf, len);
 		return -EINVAL;
 	}
@@ -295,7 +285,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 
 	hdr_size = GPR_PKT_GET_HEADER_BYTE_SIZE(hdr->header);
 	if (hdr_size < GPR_HDR_SIZE) {
-		dev_err_ratelimited(gpr->dev, "GPR: Wrong hdr size:%d\n", hdr_size);
+		dev_err(gpr->dev, "GPR: Wrong hdr size:%d\n", hdr_size);
 		return -EINVAL;
 	}
 
@@ -303,7 +293,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 	dev_dbg(gpr->dev,"Header %x", hdr->header);
 
 	if (pkt_size < GPR_HDR_SIZE || pkt_size != len) {
-		dev_err_ratelimited(gpr->dev, "GPR: Wrong packet size\n");
+		dev_err(gpr->dev, "GPR: Wrong packet size\n");
 		return -EINVAL;
 	}
 
@@ -329,7 +319,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
 
 	if (!adrv) {
-		dev_err_ratelimited(gpr->dev, "GPR: service is not registered\n");
+		dev_err(gpr->dev, "GPR: service is not registered\n");
 		if (hdr->opcode == APM_EVENT_MODULE_TO_CLIENT)
 			__pm_relax(gpr_priv->wsource);
 		return -EINVAL;
@@ -376,7 +366,7 @@ static int gpr_device_probe(struct device *dev)
 	return adrv->probe(adev);
 }
 
-static void gpr_device_remove(struct device *dev)
+static int gpr_device_remove(struct device *dev)
 {
 	struct gpr_device *adev = to_gpr_device(dev);
 	struct gpr_driver *adrv;
@@ -391,7 +381,7 @@ static void gpr_device_remove(struct device *dev)
 		spin_unlock(&gpr->svcs_lock);
 	}
 
-	return;
+	return 0;
 }
 
 static int gpr_uevent(struct device *dev, struct kobj_uevent_env *env)
@@ -450,11 +440,11 @@ static int gpr_add_device(struct device *dev, struct device_node *np,
 		  id->svc_id + 1, GFP_ATOMIC);
 	spin_unlock(&gpr->svcs_lock);
 
-	dev_info_ratelimited(dev, "Adding GPR dev: %s\n", dev_name(&adev->dev));
+	dev_info(dev, "Adding GPR dev: %s\n", dev_name(&adev->dev));
 
 	ret = device_register(&adev->dev);
 	if (ret) {
-		dev_err_ratelimited(dev, "device_register failed: %d\n", ret);
+		dev_err(dev, "device_register failed: %d\n", ret);
 		put_device(&adev->dev);
 	}
 
@@ -475,7 +465,7 @@ static void of_register_gpr_devices(struct device *dev)
 		id.domain_id = gpr->dest_domain_id;
 
 		if (gpr_add_device(dev, node, &id))
-			dev_err_ratelimited(dev, "Failed to add gpr %d svc\n", id.svc_id);
+			dev_err(dev, "Failed to add gpr %d svc\n", id.svc_id);
 	}
 }
 
@@ -491,8 +481,7 @@ static void gpr_notifier_register(struct work_struct *work)
 				       &modem_service_nb);
 	}
 
-	dev_info_ratelimited(gpr_priv->dev,
-		"%s: registered via subsys_notif_register for domain id(%d)",
+	dev_info(gpr_priv->dev, "%s: registered via subsys_notif_register for domain id(%d)",
 		__func__, gpr_priv->dest_domain_id  );
 	return;
 }

@@ -61,20 +61,16 @@ ifeq ($(KERNEL_BUILD), 0)
 		include $(AUDIO_ROOT)/config/waipioauto.conf
 		INCS    +=  -include $(AUDIO_ROOT)/config/waipioautoconf.h
 	endif
-	ifeq ($(BOARD_PLATFORM), kalama)
-		include $(AUDIO_ROOT)/config/kalamaauto.conf
-		INCS    +=  -include $(AUDIO_ROOT)/config/kalamaautoconf.h
-	endif
-	ifeq ($(BOARD_PLATFORM), crow)
-		include $(AUDIO_ROOT)/config/crowauto.conf
-		INCS    +=  -include $(AUDIO_ROOT)/config/crowautoconf.h
+	ifeq ($(CONFIG_ARCH_PARROT), y)
+		include $(AUDIO_ROOT)/config/waipioauto.conf
+		INCS    +=  -include $(AUDIO_ROOT)/config/waipioautoconf.h
 	endif
 	ifeq ($(CONFIG_ARCH_LITO), y)
 		include $(AUDIO_ROOT)/config/litoauto.conf
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/litoautoconf.h
 	endif
-	ifeq ($(CONFIG_ARCH_KHAJE), y)
+	ifeq ($(CONFIG_ARCH_BENGAL), y)
 		include $(AUDIO_ROOT)/config/bengalauto.conf
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/bengalautoconf.h
@@ -104,11 +100,6 @@ ifeq ($(KERNEL_BUILD), 0)
 		include $(AUDIO_ROOT)/config/sdxlemurauto.conf
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/sdxlemurautoconf.h
-	endif
-	ifeq ($(CONFIG_ARCH_SDXPINN), y)
-		include $(AUDIO_ROOT)/config/sdxpinnauto.conf
-		export
-		INCS    +=  -include $(AUDIO_ROOT)/config/sdxpinnautoconf.h
 	endif
 endif
 endif
@@ -176,11 +167,6 @@ endif
 # for WAIPIO sound card driver
 ifdef CONFIG_SND_SOC_WAIPIO
 	MACHINE_OBJS += waipio.o
-endif
-
-# for KALAMA sound card driver
-ifdef CONFIG_SND_SOC_KALAMA
-	MACHINE_OBJS += kalama.o
 endif
 
 # for HOLI sound card driver
@@ -270,12 +256,6 @@ machine_dlkm-y := $(MACHINE_OBJS)
 obj-$(CONFIG_SND_SOC_WAIPIO) += machine_dlkm.o
 machine_dlkm-y := $(MACHINE_OBJS)
 
-obj-$(CONFIG_SND_SOC_KALAMA) += machine_dlkm.o
-machine_dlkm-y := $(MACHINE_OBJS)
-
-obj-$(CONFIG_SND_SOC_CROW) += machine_dlkm.o
-machine_dlkm-y := $(MACHINE_OBJS)
-
 obj-$(CONFIG_SND_SOC_HOLI) += machine_dlkm.o
 machine_dlkm-y := $(MACHINE_OBJS)
 
@@ -290,3 +270,6 @@ machine_dlkm-y := $(MACHINE_OBJS)
 
 obj-$(CONFIG_SND_SOC_SDX) += machine_dlkm.o
 machine_dlkm-y := $(MACHINE_OBJS)
+
+# inject some build related information
+DEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"

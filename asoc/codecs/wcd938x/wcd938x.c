@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -42,7 +42,7 @@
 #define ADC_MODE_VAL_ULP1     0x09
 #define ADC_MODE_VAL_ULP2     0x0B
 
-#define NUM_ATTEMPTS 20
+#define NUM_ATTEMPTS 5
 
 #define DAPM_MICBIAS1_STANDALONE "MIC BIAS1 Standalone"
 #define DAPM_MICBIAS2_STANDALONE "MIC BIAS2 Standalone"
@@ -80,8 +80,6 @@ enum {
 	WCD_ADC2_MODE,
 	WCD_ADC3_MODE,
 	WCD_ADC4_MODE,
-        WCD_HPHL_EN,
-        WCD_EAR_EN,
 };
 
 enum {
@@ -145,6 +143,7 @@ static struct regmap_irq_chip wcd938x_regmap_irq_chip = {
 	.type_base = WCD938X_DIGITAL_INTR_LEVEL_0,
 	.ack_base = WCD938X_DIGITAL_INTR_CLEAR_0,
 	.use_ack = 1,
+	.mask_writeonly = 1,
 	.runtime_pm = false,
 	.handle_post_irq = wcd938x_handle_post_irq,
 	.irq_drv_data = NULL,
@@ -320,7 +319,7 @@ static int wcd938x_set_port_params(struct snd_soc_component *component,
 		num_ports = wcd938x->num_tx_ports;
 		break;
 	default:
-		dev_err_ratelimited(component->dev, "%s Invalid path selected %u\n",
+		dev_err(component->dev, "%s Invalid path selected %u\n",
 					__func__, path);
 		return -EINVAL;
 	}
@@ -333,7 +332,7 @@ static int wcd938x_set_port_params(struct snd_soc_component *component,
 	}
 found:
 	if (i > num_ports || j == MAX_CH_PER_PORT) {
-		dev_err_ratelimited(component->dev, "%s Failed to find slave port for type %u\n",
+		dev_err(component->dev, "%s Failed to find slave port for type %u\n",
 						__func__, slv_prt_type);
 		return -EINVAL;
 	}
@@ -618,13 +617,13 @@ struct wcd938x_mbhc *wcd938x_soc_get_mbhc(struct snd_soc_component *component)
 	struct wcd938x_priv *wcd938x;
 
 	if (!component) {
-		pr_err_ratelimited("%s: Invalid params, NULL component\n", __func__);
+		pr_err("%s: Invalid params, NULL component\n", __func__);
 		return NULL;
 	}
 	wcd938x = snd_soc_component_get_drvdata(component);
 
 	if (!wcd938x) {
-		pr_err_ratelimited("%s: wcd938x is NULL\n", __func__);
+		pr_err("%s: wcd938x is NULL\n", __func__);
 		return NULL;
 	}
 
@@ -789,13 +788,10 @@ static int wcd938x_codec_ear_dac_event(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 				WCD938X_DIGITAL_CDC_DIG_CLK_CTL, 0x04, 0x00);
 		} else {
-			if (!(test_bit(WCD_HPHL_EN, &wcd938x->status_mask))) {
-				snd_soc_component_update_bits(component,
-					WCD938X_DIGITAL_CDC_HPH_GAIN_CTL, 0x04, 0x00);
-					snd_soc_component_update_bits(component,
-						WCD938X_DIGITAL_CDC_DIG_CLK_CTL,
-						0x01, 0x00);
-			}
+			snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_CDC_HPH_GAIN_CTL, 0x04, 0x00);
+			snd_soc_component_update_bits(component,
+				WCD938X_DIGITAL_CDC_DIG_CLK_CTL, 0x01, 0x00);
 			if (wcd938x->comp1_enable)
 				snd_soc_component_update_bits(component,
 					WCD938X_DIGITAL_CDC_COMP_CTL_0,
@@ -1029,7 +1025,6 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 		set_bit(HPH_PA_DELAY, &wcd938x->status_mask);
 		snd_soc_component_update_bits(component,
 				WCD938X_DIGITAL_PDM_WD_CTL0, 0x07, 0x03);
-		set_bit(WCD_HPHL_EN, &wcd938x->status_mask);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		/*
@@ -1064,14 +1059,12 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 					WCD938X_IRQ_HPHL_PDM_WD_INT);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		if (!test_bit(WCD_EAR_EN, &wcd938x->status_mask)) {
-			if (wcd938x->update_wcd_event)
-				wcd938x->update_wcd_event(wcd938x->handle,
-							SLV_BOLERO_EVT_RX_MUTE,
-							(WCD_RX1 << 0x10 | 0x1));
-			wcd_disable_irq(&wcd938x->irq_info,
-						WCD938X_IRQ_HPHL_PDM_WD_INT);
-		}
+		if (wcd938x->update_wcd_event)
+			wcd938x->update_wcd_event(wcd938x->handle,
+						SLV_BOLERO_EVT_RX_MUTE,
+						(WCD_RX1 << 0x10 | 0x1));
+		wcd_disable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHL_PDM_WD_INT);
 		if (wcd938x->update_wcd_event && wcd938x->comp1_enable)
 			wcd938x->update_wcd_event(wcd938x->handle,
 					SLV_BOLERO_EVT_RX_COMPANDER_SOFT_RST,
@@ -1120,7 +1113,6 @@ static int wcd938x_codec_enable_hphl_pa(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 						WCD938X_LDOH_MODE,
 						0x80, 0x00);
-		clear_bit(WCD_HPHL_EN, &wcd938x->status_mask);
 		break;
 	};
 	return ret;
@@ -1218,12 +1210,10 @@ static int wcd938x_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 					WCD938X_DIGITAL_PDM_WD_CTL2,
 					0x01, 0x01);
-		else {
+		else
 			snd_soc_component_update_bits(component,
 					WCD938X_DIGITAL_PDM_WD_CTL0,
 					0x07, 0x03);
-			set_bit(WCD_EAR_EN, &wcd938x->status_mask);
-		}
 		if (!wcd938x->comp1_enable)
 			snd_soc_component_update_bits(component,
 				WCD938X_ANA_EAR_COMPANDER_CTL, 0x80, 0x80);
@@ -1261,14 +1251,12 @@ static int wcd938x_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 						SLV_BOLERO_EVT_RX_MUTE,
 						(WCD_RX3 << 0x10 | 0x1));
 		} else {
-			if(!test_bit(WCD_HPHL_EN, &wcd938x->status_mask)) {
-				wcd_disable_irq(&wcd938x->irq_info,
-						WCD938X_IRQ_HPHL_PDM_WD_INT);
-				if (wcd938x->update_wcd_event)
-					wcd938x->update_wcd_event(wcd938x->handle,
-							SLV_BOLERO_EVT_RX_MUTE,
-							(WCD_RX1 << 0x10 | 0x1));
-			}
+			wcd_disable_irq(&wcd938x->irq_info,
+					WCD938X_IRQ_HPHL_PDM_WD_INT);
+			if (wcd938x->update_wcd_event)
+				wcd938x->update_wcd_event(wcd938x->handle,
+						SLV_BOLERO_EVT_RX_MUTE,
+						(WCD_RX1 << 0x10 | 0x1));
 		}
 		break;
 	case SND_SOC_DAPM_POST_PMD:
@@ -1281,12 +1269,10 @@ static int wcd938x_codec_enable_ear_pa(struct snd_soc_dapm_widget *w,
 			snd_soc_component_update_bits(component,
 					WCD938X_DIGITAL_PDM_WD_CTL2,
 					0x01, 0x00);
-		else {
+		else
 			snd_soc_component_update_bits(component,
 					WCD938X_DIGITAL_PDM_WD_CTL0,
 					0x07, 0x00);
-			clear_bit(WCD_EAR_EN, &wcd938x->status_mask);
-		}
 		wcd_cls_h_fsm(component, &wcd938x->clsh_info,
 			     WCD_CLSH_EVENT_POST_PA,
 			     WCD_CLSH_STATE_EAR,
@@ -1346,16 +1332,13 @@ static int wcd938x_enable_rx1(struct snd_soc_dapm_widget *w,
 			wcd938x_rx_connect_port(component, COMP_L, true);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		 if (!test_bit(WCD_HPHL_EN, &wcd938x->status_mask) &&
-				!test_bit(WCD_EAR_EN, &wcd938x->status_mask)) {
-			wcd938x_rx_connect_port(component, HPH_L, false);
-			if (wcd938x->comp1_enable)
-				wcd938x_rx_connect_port(component, COMP_L, false);
-			wcd938x_rx_clk_disable(component);
-			snd_soc_component_update_bits(component,
+		wcd938x_rx_connect_port(component, HPH_L, false);
+		if (wcd938x->comp1_enable)
+			wcd938x_rx_connect_port(component, COMP_L, false);
+		wcd938x_rx_clk_disable(component);
+		snd_soc_component_update_bits(component,
 				WCD938X_DIGITAL_CDC_DIG_CLK_CTL,
 				0x01, 0x00);
-		}
 		break;
 	};
 
@@ -1476,7 +1459,7 @@ static int wcd938x_codec_enable_dmic(struct snd_soc_dapm_widget *w,
 		dmic_ctl_shift = 0x03;
 		break;
 	default:
-		dev_err_ratelimited(component->dev, "%s: Invalid DMIC Selection\n",
+		dev_err(component->dev, "%s: Invalid DMIC Selection\n",
 			__func__);
 		return -EINVAL;
 	};
@@ -1533,7 +1516,7 @@ int wcd938x_get_micb_vout_ctl_val(u32 micb_mv)
 {
 	/* min micbias voltage is 1V and maximum is 2.85V */
 	if (micb_mv < 1000 || micb_mv > 2850) {
-		pr_err_ratelimited("%s: unsupported micbias voltage\n", __func__);
+		pr_err("%s: unsupported micbias voltage\n", __func__);
 		return -EINVAL;
 	}
 
@@ -1748,7 +1731,7 @@ static int wcd938x_get_adc_mode(int val)
 		break;
 	default:
 		ret = -EINVAL;
-		pr_err_ratelimited("%s: invalid ADC mode value %d\n", __func__, val);
+		pr_err("%s: invalid ADC mode value %d\n", __func__, val);
 		break;
 	}
 	return ret;
@@ -1778,7 +1761,7 @@ int wcd938x_tx_channel_config(struct snd_soc_component *component,
 		mask = 0x20;
 		break;
 	default:
-		pr_err_ratelimited("%s: Invalid channel num %d\n", __func__, channel);
+		pr_err("%s: Invalid channel num %d\n", __func__, channel);
 		ret = -EINVAL;
 		break;
 	}
@@ -1904,7 +1887,7 @@ static int wcd938x_enable_req(struct snd_soc_dapm_widget *w,
 		ret = wcd938x_tx_channel_config(component, w->shift, 1);
 		mode = wcd938x_get_adc_mode(wcd938x->tx_mode[w->shift]);
 		if (mode < 0) {
-			dev_info_ratelimited(component->dev,
+			dev_info(component->dev,
 				 "%s: invalid mode, setting to normal mode\n",
 				 __func__);
 			mode = ADC_MODE_VAL_NORMAL;
@@ -2000,14 +1983,14 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 	int ret = 0;
 
 	if ((micb_index < 0) || (micb_index > WCD938X_MAX_MICBIAS - 1)) {
-		dev_err_ratelimited(component->dev,
+		dev_err(component->dev,
 			"%s: Invalid micbias index, micb_ind:%d\n",
 			__func__, micb_index);
 		return -EINVAL;
 	}
 
 	if (NULL == wcd938x) {
-		dev_err_ratelimited(component->dev,
+		dev_err(component->dev,
 			"%s: wcd938x private data is NULL\n", __func__);
 		return -EINVAL;
 	}
@@ -2031,7 +2014,7 @@ int wcd938x_micbias_control(struct snd_soc_component *component,
 		micb_reg = WCD938X_ANA_MICB4;
 		break;
 	default:
-		dev_err_ratelimited(component->dev, "%s: Invalid micbias number: %d\n",
+		dev_err(component->dev, "%s: Invalid micbias number: %d\n",
 			__func__, micb_num);
 		return -EINVAL;
 	};
@@ -2154,13 +2137,13 @@ static int wcd938x_get_logical_addr(struct swr_device *swr_dev)
 	int num_retry = NUM_ATTEMPTS;
 
 	do {
-		/* retry after 4ms */
-		usleep_range(4000, 4010);
+		/* retry after 1ms */
+		usleep_range(1000, 1010);
 		ret = swr_get_logical_dev_num(swr_dev, swr_dev->addr, &devnum);
 	} while (ret && --num_retry);
 
 	if (ret)
-		dev_err_ratelimited(&swr_dev->dev,
+		dev_err(&swr_dev->dev,
 			"%s get devnum %d for dev addr %llx failed\n",
 			__func__, devnum, swr_dev->addr);
 
@@ -2185,7 +2168,7 @@ int wcd938x_swr_dmic_register_notifier(struct snd_soc_component *component,
 {
 	struct wcd938x_priv *wcd938x_priv;
 	if(NULL == component) {
-		pr_err_ratelimited("%s: wcd938x component is NULL\n", __func__);
+		pr_err("%s: wcd938x component is NULL\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2273,7 +2256,7 @@ static int wcd938x_event_notify(struct notifier_block *block,
 		mbhc = &wcd938x->mbhc->wcd_mbhc;
 		ret = wcd938x_mbhc_post_ssr_init(wcd938x->mbhc, component);
 		if (ret) {
-			dev_err_ratelimited(component->dev, "%s: mbhc initialization failed\n",
+			dev_err(component->dev, "%s: mbhc initialization failed\n",
 				__func__);
 		} else {
 			wcd938x_mbhc_hs_detect(component, mbhc->mbhc_cfg);
@@ -2397,12 +2380,12 @@ static int wcd938x_wakeup(void *handle, bool enable)
 	int ret = 0;
 
 	if (!handle) {
-		pr_err_ratelimited("%s: NULL handle\n", __func__);
+		pr_err("%s: NULL handle\n", __func__);
 		return -EINVAL;
 	}
 	priv = (struct wcd938x_priv *)handle;
 	if (!priv->tx_swr_dev) {
-		pr_err_ratelimited("%s: tx swr dev is NULL\n", __func__);
+		pr_err("%s: tx swr dev is NULL\n", __func__);
 		return -EINVAL;
 	}
 	mutex_lock(&priv->wakeup_lock);
@@ -2447,7 +2430,7 @@ static int wcd938x_enable_micbias(struct wcd938x_priv *wcd938x,
 	u16 micb_reg;
 
 	if (NULL == wcd938x) {
-		pr_err_ratelimited("%s: wcd938x private data is NULL\n", __func__);
+		pr_err("%s: wcd938x private data is NULL\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2465,7 +2448,7 @@ static int wcd938x_enable_micbias(struct wcd938x_priv *wcd938x,
 		micb_reg = WCD938X_ANA_MICB4;
 		break;
 	default:
-		pr_err_ratelimited("%s: Invalid micbias number: %d\n", __func__, micb_num);
+		pr_err("%s: Invalid micbias number: %d\n", __func__, micb_num);
 		return -EINVAL;
 	};
 
@@ -2540,15 +2523,15 @@ int wcd938x_codec_force_enable_micbias_v2(struct snd_soc_component *component,
 	int micb_index = micb_num - 1;
 
 	if(NULL == component) {
-		pr_err_ratelimited("%s: wcd938x component is NULL\n", __func__);
+		pr_err("%s: wcd938x component is NULL\n", __func__);
 		return -EINVAL;
 	}
 	if(event != SND_SOC_DAPM_PRE_PMU && event != SND_SOC_DAPM_POST_PMD) {
-		pr_err_ratelimited("%s: invalid event: %d\n", __func__, event);
+		pr_err("%s: invalid event: %d\n", __func__, event);
 		return -EINVAL;
 	}
 	if(micb_num < MIC_BIAS_1 || micb_num > MIC_BIAS_4) {
-		pr_err_ratelimited("%s: invalid mic bias num: %d\n", __func__, micb_num);
+		pr_err("%s: invalid mic bias num: %d\n", __func__, micb_num);
 		return -EINVAL;
 	}
 
@@ -2598,21 +2581,21 @@ static inline int wcd938x_tx_path_get(const char *wname,
 
 	path_name = strsep(&widget_name, " ");
 	if (!path_name) {
-		pr_err_ratelimited("%s: Invalid widget name = %s\n",
+		pr_err("%s: Invalid widget name = %s\n",
 			__func__, widget_name);
 		ret = -EINVAL;
 		goto err;
 	}
 	path_num_char = strpbrk(path_name, "0123");
 	if (!path_num_char) {
-		pr_err_ratelimited("%s: tx path index not found\n",
+		pr_err("%s: tx path index not found\n",
 			__func__);
 		ret = -EINVAL;
 		goto err;
 	}
 	ret = kstrtouint(path_num_char, 10, path_num);
 	if (ret < 0)
-		pr_err_ratelimited("%s: Invalid tx path = %s\n",
+		pr_err("%s: Invalid tx path = %s\n",
 			__func__, w_name);
 
 err:
@@ -2700,14 +2683,14 @@ static int wcd938x_rx_hph_mode_put(struct snd_kcontrol *kcontrol,
 
 	if (wcd938x->variant == WCD9380) {
 		if (mode_val == CLS_H_HIFI || mode_val == CLS_AB_HIFI) {
-			dev_info_ratelimited(component->dev,
+			dev_info(component->dev,
 				"%s:Invalid HPH Mode, default to CLS_H_ULP\n",
 				__func__);
 			mode_val = CLS_H_ULP;
 		}
 	}
 	if (mode_val == CLS_H_NORMAL) {
-		dev_info_ratelimited(component->dev,
+		dev_info(component->dev,
 			"%s:Invalid HPH Mode, default to class_AB\n",
 			__func__);
 		mode_val = CLS_H_ULP;
@@ -2773,7 +2756,7 @@ int wcd938x_codec_get_dev_num(struct snd_soc_component *component)
 
 	wcd938x = snd_soc_component_get_drvdata(component);
 	if (!wcd938x || !wcd938x->rx_swr_dev) {
-		pr_err_ratelimited("%s: wcd938x component is NULL\n", __func__);
+		pr_err("%s: wcd938x component is NULL\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2832,7 +2815,7 @@ static int wcd938x_codec_enable_vdd_buck(struct snd_soc_dapm_widget *w,
 	pdata = dev_get_platdata(wcd938x->dev);
 
 	if (!pdata) {
-		dev_err_ratelimited(component->dev, "%s: pdata is NULL\n", __func__);
+		dev_err(component->dev, "%s: pdata is NULL\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2861,7 +2844,7 @@ static int wcd938x_codec_enable_vdd_buck(struct snd_soc_dapm_widget *w,
 						pdata->num_supplies,
 						"cdc-vdd-buck");
 		if (ret == -EINVAL) {
-			dev_err_ratelimited(component->dev, "%s: vdd buck is not enabled\n",
+			dev_err(component->dev, "%s: vdd buck is not enabled\n",
 				__func__);
 			return ret;
 		}
@@ -2904,14 +2887,14 @@ static int wcd938x_ldoh_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static const char * const tx_master_ch_text[] = {
-	"ZERO", "SWRM_PCM_OUT", "SWRM_TX1_CH1", "SWRM_TX1_CH2", "SWRM_TX1_CH3",
-	"SWRM_TX1_CH4", "SWRM_TX2_CH1", "SWRM_TX2_CH2", "SWRM_TX2_CH3",
-	"SWRM_TX2_CH4", "SWRM_TX3_CH1", "SWRM_TX3_CH2", "SWRM_TX3_CH3",
-	"SWRM_TX3_CH4", "SWRM_PCM_IN",
+const char * const tx_master_ch_text[] = {
+	"ZERO", "SWRM_TX1_CH1", "SWRM_TX1_CH2", "SWRM_TX1_CH3", "SWRM_TX1_CH4",
+	"SWRM_TX2_CH1", "SWRM_TX2_CH2", "SWRM_TX2_CH3", "SWRM_TX2_CH4",
+	"SWRM_TX3_CH1", "SWRM_TX3_CH2", "SWRM_TX3_CH3", "SWRM_TX3_CH4",
+	"SWRM_PCM_IN",
 };
 
-static const struct soc_enum tx_master_ch_enum =
+const struct soc_enum tx_master_ch_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tx_master_ch_text),
 					tx_master_ch_text);
 
@@ -2946,7 +2929,7 @@ static void wcd938x_tx_get_slave_ch_type_idx(const char *wname, int *ch_idx)
 	else if (strnstr(wname, "DMIC7", sizeof("DMIC7")))
 		ch_type = DMIC7;
 	else
-		pr_err_ratelimited("%s: port name: %s is not listed\n", __func__, wname);
+		pr_err("%s: port name: %s is not listed\n", __func__, wname);
 
 	if (ch_type)
 		*ch_idx = wcd938x_slave_get_slave_ch_val(ch_type);
@@ -3004,7 +2987,7 @@ static int wcd938x_tx_master_ch_put(struct snd_kcontrol *kcontrol,
 			__func__, ucontrol->value.enumerated.item[0]);
 
 	idx = ucontrol->value.enumerated.item[0];
-	if (idx < 0 || idx >= ARRAY_SIZE(wcd938x_swr_master_ch_map))
+	if (idx < 0 || idx >= ARRAY_SIZE(swr_master_ch_map))
 		return -EINVAL;
 
 	wcd938x->tx_master_ch_map[slave_ch_idx] = wcd938x_slave_get_master_ch(idx);
@@ -3781,7 +3764,7 @@ static ssize_t wcd938x_version_read(struct snd_info_entry *entry,
 
 	priv = (struct wcd938x_priv *) entry->private_data;
 	if (!priv) {
-		pr_err_ratelimited("%s: wcd938x priv is null\n", __func__);
+		pr_err("%s: wcd938x priv is null\n", __func__);
 		return -EINVAL;
 	}
 
@@ -3812,7 +3795,7 @@ static ssize_t wcd938x_variant_read(struct snd_info_entry *entry,
 
 	priv = (struct wcd938x_priv *) entry->private_data;
 	if (!priv) {
-		pr_err_ratelimited("%s: wcd938x priv is null\n", __func__);
+		pr_err("%s: wcd938x priv is null\n", __func__);
 		return -EINVAL;
 	}
 
@@ -4167,7 +4150,7 @@ static int wcd938x_reset(struct device *dev)
 		return -EINVAL;
 
 	if (!wcd938x->rst_np) {
-		dev_err_ratelimited(dev, "%s: reset gpio device node not specified\n",
+		dev_err(dev, "%s: reset gpio device node not specified\n",
 				__func__);
 		return -EINVAL;
 	}
@@ -4178,7 +4161,7 @@ static int wcd938x_reset(struct device *dev)
 
 	rc = msm_cdc_pinctrl_select_sleep_state(wcd938x->rst_np);
 	if (rc) {
-		dev_err_ratelimited(dev, "%s: wcd sleep state request fail!\n",
+		dev_err(dev, "%s: wcd sleep state request fail!\n",
 				__func__);
 		return rc;
 	}
@@ -4187,7 +4170,7 @@ static int wcd938x_reset(struct device *dev)
 
 	rc = msm_cdc_pinctrl_select_active_state(wcd938x->rst_np);
 	if (rc) {
-		dev_err_ratelimited(dev, "%s: wcd active state request fail!\n",
+		dev_err(dev, "%s: wcd active state request fail!\n",
 				__func__);
 		return rc;
 	}
@@ -4282,14 +4265,14 @@ static int wcd938x_reset_low(struct device *dev)
 		return -EINVAL;
 
 	if (!wcd938x->rst_np) {
-		dev_err_ratelimited(dev, "%s: reset gpio device node not specified\n",
+		dev_err(dev, "%s: reset gpio device node not specified\n",
 				__func__);
 		return -EINVAL;
 	}
 
 	rc = msm_cdc_pinctrl_select_sleep_state(wcd938x->rst_np);
 	if (rc) {
-		dev_err_ratelimited(dev, "%s: wcd sleep state request fail!\n",
+		dev_err(dev, "%s: wcd sleep state request fail!\n",
 				__func__);
 		return rc;
 	}
@@ -4312,7 +4295,7 @@ struct wcd938x_pdata *wcd938x_populate_dt_data(struct device *dev)
 			"qcom,wcd-rst-gpio-node", 0);
 
 	if (!pdata->rst_np) {
-		dev_err_ratelimited(dev, "%s: Looking up %s property in node %s failed\n",
+		dev_err(dev, "%s: Looking up %s property in node %s failed\n",
 				__func__, "qcom,wcd-rst-gpio-node",
 				dev->of_node->full_name);
 		return NULL;
@@ -4322,7 +4305,7 @@ struct wcd938x_pdata *wcd938x_populate_dt_data(struct device *dev)
 	msm_cdc_get_power_supplies(dev, &pdata->regulator,
 				   &pdata->num_supplies);
 	if (!pdata->regulator || (pdata->num_supplies <= 0)) {
-		dev_err_ratelimited(dev, "%s: no power supplies defined for codec\n",
+		dev_err(dev, "%s: no power supplies defined for codec\n",
 			__func__);
 		return NULL;
 	}
@@ -4381,14 +4364,14 @@ static int wcd938x_bind(struct device *dev)
 
 	ret = component_bind_all(dev, wcd938x);
 	if (ret) {
-		dev_err_ratelimited(dev, "%s: Slave bind failed, ret = %d\n",
+		dev_err(dev, "%s: Slave bind failed, ret = %d\n",
 			__func__, ret);
 		return ret;
 	}
 
 	wcd938x->rx_swr_dev = get_matching_swr_slave_device(pdata->rx_slave);
 	if (!wcd938x->rx_swr_dev) {
-		dev_err_ratelimited(dev, "%s: Could not find RX swr slave device\n",
+		dev_err(dev, "%s: Could not find RX swr slave device\n",
 			 __func__);
 		ret = -ENODEV;
 		goto err;
@@ -4396,7 +4379,7 @@ static int wcd938x_bind(struct device *dev)
 
 	wcd938x->tx_swr_dev = get_matching_swr_slave_device(pdata->tx_slave);
 	if (!wcd938x->tx_swr_dev) {
-		dev_err_ratelimited(dev, "%s: Could not find TX swr slave device\n",
+		dev_err(dev, "%s: Could not find TX swr slave device\n",
 			__func__);
 		ret = -ENODEV;
 		goto err;
@@ -4407,7 +4390,7 @@ static int wcd938x_bind(struct device *dev)
 	wcd938x->regmap = devm_regmap_init_swr(wcd938x->tx_swr_dev,
 					       &wcd938x_regmap_config);
 	if (!wcd938x->regmap) {
-		dev_err_ratelimited(dev, "%s: Regmap init failed\n",
+		dev_err(dev, "%s: Regmap init failed\n",
 				__func__);
 		goto err;
 	}
@@ -4425,7 +4408,7 @@ static int wcd938x_bind(struct device *dev)
 	ret = wcd_irq_init(&wcd938x->irq_info, &wcd938x->virq);
 
 	if (ret) {
-		dev_err_ratelimited(wcd938x->dev, "%s: IRQ init failed: %d\n",
+		dev_err(wcd938x->dev, "%s: IRQ init failed: %d\n",
 			__func__, ret);
 		goto err;
 	}
@@ -4433,7 +4416,7 @@ static int wcd938x_bind(struct device *dev)
 
 	ret = wcd938x_set_micbias_data(wcd938x, pdata);
 	if (ret < 0) {
-		dev_err_ratelimited(dev, "%s: bad micbias pdata\n", __func__);
+		dev_err(dev, "%s: bad micbias pdata\n", __func__);
 		goto err_irq;
 	}
 
@@ -4452,7 +4435,7 @@ static int wcd938x_bind(struct device *dev)
 	ret = snd_soc_register_component(dev, &soc_codec_dev_wcd938x,
 					wcd938x_dai, ARRAY_SIZE(wcd938x_dai));
 	if (ret) {
-		dev_err_ratelimited(dev, "%s: Codec registration failed\n",
+		dev_err(dev, "%s: Codec registration failed\n",
 				__func__);
 		goto err_irq;
 	}
@@ -4507,7 +4490,7 @@ static int wcd938x_add_slave_components(struct device *dev,
 
 	rx_node = of_parse_phandle(np, "qcom,rx-slave", 0);
 	if (!rx_node) {
-		dev_err_ratelimited(dev, "%s: Rx-slave node not defined\n", __func__);
+		dev_err(dev, "%s: Rx-slave node not defined\n", __func__);
 		return -ENODEV;
 	}
 	of_node_get(rx_node);
@@ -4518,7 +4501,7 @@ static int wcd938x_add_slave_components(struct device *dev,
 
 	tx_node = of_parse_phandle(np, "qcom,tx-slave", 0);
 	if (!tx_node) {
-		dev_err_ratelimited(dev, "%s: Tx-slave node not defined\n", __func__);
+		dev_err(dev, "%s: Tx-slave node not defined\n", __func__);
 			return -ENODEV;
 	}
 	of_node_get(tx_node);
@@ -4662,7 +4645,7 @@ static int wcd938x_suspend(struct device *dev)
 	pdata = dev_get_platdata(wcd938x->dev);
 
 	if (!pdata) {
-		dev_err_ratelimited(dev, "%s: pdata is NULL\n", __func__);
+		dev_err(dev, "%s: pdata is NULL\n", __func__);
 		return -EINVAL;
 	}
 
@@ -4673,16 +4656,13 @@ static int wcd938x_suspend(struct device *dev)
 						pdata->num_supplies,
 						"cdc-vdd-buck");
 		if (ret == -EINVAL) {
-			dev_err_ratelimited(dev, "%s: vdd buck is not disabled\n",
+			dev_err(dev, "%s: vdd buck is not disabled\n",
 				__func__);
 			return 0;
 		}
 		clear_bit(ALLOW_BUCK_DISABLE, &wcd938x->status_mask);
 	}
-	if (wcd938x->dapm_bias_off ||
-		(wcd938x->component &&
-		(snd_soc_component_get_bias_level(wcd938x->component) ==
-			SND_SOC_BIAS_OFF))) {
+	if (wcd938x->dapm_bias_off) {
 		msm_cdc_set_supplies_lpm_mode(wcd938x->dev,
 					      wcd938x->supplies,
 					      pdata->regulator,
@@ -4708,7 +4688,7 @@ static int wcd938x_resume(struct device *dev)
 	pdata = dev_get_platdata(wcd938x->dev);
 
 	if (!pdata) {
-		dev_err_ratelimited(dev, "%s: pdata is NULL\n", __func__);
+		dev_err(dev, "%s: pdata is NULL\n", __func__);
 		return -EINVAL;
 	}
 

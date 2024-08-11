@@ -51,20 +51,16 @@ ifeq ($(KERNEL_BUILD), 0)
 		include $(AUDIO_ROOT)/config/waipioauto.conf
 		INCS    +=  -include $(AUDIO_ROOT)/config/waipioautoconf.h
 	endif
-	ifeq ($(CONFIG_ARCH_KALAMA), y)
-		include $(AUDIO_ROOT)/config/kalamaauto.conf
-		INCS    +=  -include $(AUDIO_ROOT)/config/kalamaautoconf.h
-	endif
-	ifeq ($(CONFIG_ARCH_CROW), y)
-		include $(AUDIO_ROOT)/config/crowauto.conf
-		INCS    +=  -include $(AUDIO_ROOT)/config/crowautoconf.h
+	ifeq ($(CONFIG_ARCH_PARROT), y)
+		include $(AUDIO_ROOT)/config/waipioauto.conf
+		INCS    +=  -include $(AUDIO_ROOT)/config/waipioautoconf.h
 	endif
 	ifeq ($(CONFIG_ARCH_LITO), y)
 		include $(AUDIO_ROOT)/config/litoauto.conf
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/litoautoconf.h
 	endif
-	ifeq ($(CONFIG_ARCH_KHAJE), y)
+	ifeq ($(CONFIG_ARCH_BENGAL), y)
 		include $(AUDIO_ROOT)/config/bengalauto.conf
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/bengalautoconf.h
@@ -106,11 +102,6 @@ ifeq ($(KERNEL_BUILD), 0)
 		export
 		INCS    +=  -include $(AUDIO_ROOT)/config/sdxlemurautoconf.h
 	endif
-	ifeq ($(CONFIG_ARCH_SDXPINN), y)
-		include $(AUDIO_ROOT)/config/sdxpinnauto.conf
-		export
-		INCS    +=  -include $(AUDIO_ROOT)/config/sdxpinnautoconf.h
-	endif
 endif
 endif
 
@@ -145,11 +136,7 @@ GPRV_GLINK += gpr-lite.o
 endif
 
 ifdef CONFIG_AUDIO_PKT
-ifdef CONFIG_SND_SOC_PCIE
-AUDIO_PKT += audio-pcie-pkt.o
-else
 AUDIO_PKT += audio-pkt.o
-endif
 endif
 
 LINUX_INC += -Iinclude/linux
@@ -206,3 +193,6 @@ gpr_dlkm-y := $(GPRV_GLINK)
 
 obj-$(CONFIG_AUDIO_PKT) += audio_pkt_dlkm.o
 audio_pkt_dlkm-y := $(AUDIO_PKT)
+
+# inject some build related information
+CDEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"

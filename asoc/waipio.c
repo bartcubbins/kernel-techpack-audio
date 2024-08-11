@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/soc/qcom/fsa4480-i2c.h>
 #include <linux/pm_qos.h>
+#include <linux/nvmem-consumer.h>
 #include <sound/control.h>
 #include <sound/core.h>
 #include <sound/soc.h>
@@ -31,8 +32,10 @@
 #include "asoc/msm-cdc-pinctrl.h"
 #include "asoc/wcd-mbhc-v2.h"
 #include "codecs/wcd938x/wcd938x-mbhc.h"
+#include "codecs/wcd937x/wcd937x-mbhc.h"
 #include "codecs/wsa883x/wsa883x.h"
 #include "codecs/wcd938x/wcd938x.h"
+#include "codecs/wcd937x/wcd937x.h"
 #include "codecs/lpass-cdc/lpass-cdc.h"
 #include <bindings/audio-codec-port-types.h>
 #include "codecs/lpass-cdc/lpass-cdc-wsa-macro.h"
@@ -53,7 +56,7 @@
 
 #define WCN_CDC_SLIM_RX_CH_MAX 2
 #define WCN_CDC_SLIM_TX_CH_MAX 2
-#define WCN_CDC_SLIM_TX_CH_MAX_LITO 3
+#define WCN_CDC_SLIM_TX_CH_MAX_FM 3
 
 /* Number of WSAs */
 #define MONO_SPEAKER    1
@@ -204,21 +207,30 @@ static void msm_set_upd_config(struct snd_soc_pcm_runtime *rtd)
 				return;
 			}
 		} else {
-			pr_err("%s wsa_max_devs are NULL\n", __func__);
+			pr_info("%s wsa_max_devs are NULL\n", __func__);
 			return;
 		}
 	} else {
 		component = snd_soc_rtdcom_lookup(rtd, WCD938X_DRV_NAME);
 		if (!component) {
-			pr_err("%s component is NULL\n", __func__);
-			return;
+			component = snd_soc_rtdcom_lookup(rtd, WCD937X_DRV_NAME);
+			if (!component) {
+				pr_err("%s component is NULL\n", __func__);
+				return;
+			}
 		}
 	}
 
 	if (!strcmp(pdata->upd_config.backend_used, "wsa")) {
 		pdata->get_dev_num = wsa883x_codec_get_dev_num;
 	} else {
-		pdata->get_dev_num = wcd938x_codec_get_dev_num;
+		if (!strncmp(component->driver->name, WCD937X_DRV_NAME,
+				strlen(WCD937X_DRV_NAME))){
+			pdata->get_dev_num = wcd937x_codec_get_dev_num;
+		} else if (!strncmp(component->driver->name, WCD938X_DRV_NAME,
+				strlen(WCD938X_DRV_NAME))){
+			pdata->get_dev_num = wcd938x_codec_get_dev_num;
+		}
 	}
 
 	if (!pdata->get_dev_num) {
@@ -382,7 +394,7 @@ static int msm_wcn_init(struct snd_soc_pcm_runtime *rtd)
 	unsigned int rx_ch[WCN_CDC_SLIM_RX_CH_MAX] = {157, 158};
 	unsigned int tx_ch[WCN_CDC_SLIM_TX_CH_MAX]  = {159, 160};
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
-    int ret = 0;
+	int ret = 0;
 
 	ret = snd_soc_dai_set_channel_map(codec_dai, ARRAY_SIZE(tx_ch),
 					   tx_ch, ARRAY_SIZE(rx_ch), rx_ch);
@@ -390,7 +402,23 @@ static int msm_wcn_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 
 	msm_common_dai_link_init(rtd);
-    return ret;
+	return ret;
+}
+
+static int msm_wcn_init_btfm(struct snd_soc_pcm_runtime *rtd)
+{
+	unsigned int rx_ch[WCN_CDC_SLIM_RX_CH_MAX] = {157, 158};
+	unsigned int tx_ch[WCN_CDC_SLIM_TX_CH_MAX_FM]  = {159, 160, 161};
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	int ret = 0;
+
+	ret = snd_soc_dai_set_channel_map(codec_dai, ARRAY_SIZE(tx_ch),
+					   tx_ch, ARRAY_SIZE(rx_ch), rx_ch);
+	if (ret)
+		return ret;
+
+	msm_common_dai_link_init(rtd);
+	return ret;
 }
 
 static struct snd_info_entry *msm_snd_info_create_subdir(struct module *mod,
@@ -428,11 +456,7 @@ static void *def_wcd_mbhc_cal(void)
 		(sizeof(btn_cfg->_v_btn_low[0]) * btn_cfg->num_btn);
 
 	btn_high[0] = 75;
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
 	btn_high[1] = 137;
-#else
-	btn_high[1] = 150;
-#endif
 	btn_high[2] = 237;
 	btn_high[3] = 500;
 	btn_high[4] = 500;
@@ -489,16 +513,6 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 		.ops = &msm_common_be_ops,
 		SND_SOC_DAILINK_REG(usb_audio_tx),
 	},
-	{
-		.name = LPASS_BE_PCM_DUMMY_TX_0,
-		.stream_name = LPASS_BE_PCM_DUMMY_TX_0,
-		.capture_only = 1,
-		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
-			SND_SOC_DPCM_TRIGGER_POST},
-		.ignore_suspend = 1,
-		.ops = &msm_common_be_ops,
-		SND_SOC_DAILINK_REG(pcm_dummy_tx0),
-	},
 };
 
 static struct snd_soc_dai_link msm_wcn_be_dai_links[] = {
@@ -524,6 +538,42 @@ static struct snd_soc_dai_link msm_wcn_be_dai_links[] = {
 		.ops = &msm_common_be_ops,
 		.ignore_suspend = 1,
 		SND_SOC_DAILINK_REG(slimbus_7_tx),
+	},
+};
+
+static struct snd_soc_dai_link msm_wcn_btfm_be_dai_links[] = {
+	{
+		.name = LPASS_BE_SLIMBUS_7_RX,
+		.stream_name = LPASS_BE_SLIMBUS_7_RX,
+		.playback_only = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.init = &msm_wcn_init_btfm,
+		.ops = &msm_common_be_ops,
+		/* dai link has playback support */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+		SND_SOC_DAILINK_REG(slimbus_7_rx),
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_7_TX,
+		.stream_name = LPASS_BE_SLIMBUS_7_TX,
+		.capture_only = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.ops = &msm_common_be_ops,
+		.ignore_suspend = 1,
+		SND_SOC_DAILINK_REG(slimbus_7_tx),
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_8_TX,
+		.stream_name = LPASS_BE_SLIMBUS_8_TX,
+		.capture_only = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			SND_SOC_DPCM_TRIGGER_POST},
+		.ops = &msm_common_be_ops,
+		.ignore_suspend = 1,
+		SND_SOC_DAILINK_REG(slimbus_8_tx),
 	},
 };
 
@@ -815,7 +865,7 @@ static struct snd_soc_dai_link msm_va_cdc_dma_be_dai_links[] = {
 	},
 };
 
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
+#ifndef ENABLE_WSA
 static int cs35l41_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dai **dais = rtd->dais;
@@ -823,8 +873,8 @@ static int cs35l41_init(struct snd_soc_pcm_runtime *rtd)
 	int i;
 
 	for (i = rtd->num_cpus; i < (rtd->num_cpus + rtd->num_codecs); i++) {
-		dapm = snd_soc_component_get_dapm(dais[i]->component);
 
+		dapm = snd_soc_component_get_dapm(dais[i]->component);
 		if (dapm->component->name_prefix == NULL) {
 			pr_debug("%s: name_prefix=NULL\n", __func__);
 			snd_soc_dapm_ignore_suspend(dapm, "AMP Playback");
@@ -975,7 +1025,7 @@ static struct snd_soc_dai_link msm_mi2s_dai_links[] = {
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
 		SND_SOC_DAILINK_REG(sen_mi2s_rx),
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
+#ifndef ENABLE_WSA
 		.init = &cs35l41_init,
 #endif
 	},
@@ -1129,10 +1179,11 @@ static struct snd_soc_dai_link msm_waipio_dai_links[
 			ARRAY_SIZE(ext_disp_be_dai_link) +
 			ARRAY_SIZE(msm_common_be_dai_links) +
 			ARRAY_SIZE(msm_wcn_be_dai_links) +
+			ARRAY_SIZE(msm_wcn_btfm_be_dai_links) +
 			ARRAY_SIZE(msm_mi2s_dai_links) +
 			ARRAY_SIZE(msm_tdm_dai_links)];
 
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
+#ifndef ENABLE_WSA
 static struct snd_soc_codec_conf msm_codec_conf[] = {
 	{
 		.dlc.name = NULL,
@@ -1191,7 +1242,7 @@ static int msm_populate_dai_link_component_of_node(
 					goto err;
 				}
 
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
+#ifndef ENABLE_WSA
 				if (strcmp(dai_link[i].codecs[j].name, "cs35l41_l") == 0) {
 					/*Left speaker*/
 					msm_codec_conf[0].dlc.of_node = np;
@@ -1314,16 +1365,9 @@ static int msm_snd_card_late_probe(struct snd_soc_card *card)
 {
 	struct snd_soc_component *component = NULL;
 	struct snd_soc_pcm_runtime *rtd;
-	struct msm_asoc_mach_data *pdata;
 	int ret = 0;
 	void *mbhc_calibration;
-
-	 pdata = snd_soc_card_get_drvdata(card);
-	if (!pdata)
-		return -EINVAL;
-
-	if (pdata->wcd_disabled)
-		return 0;
+	bool is_wcd937x = false;
 
 	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
 	if (!rtd) {
@@ -1335,15 +1379,25 @@ static int msm_snd_card_late_probe(struct snd_soc_card *card)
 
 	component = snd_soc_rtdcom_lookup(rtd, WCD938X_DRV_NAME);
 	if (!component) {
-		pr_err("%s component is NULL\n", __func__);
-		return -EINVAL;
+		component = snd_soc_rtdcom_lookup(rtd, WCD937X_DRV_NAME);
+		if (!component) {
+			pr_err("%s component is NULL\n", __func__);
+			return -EINVAL;
+		} else {
+			is_wcd937x = true;
+		}
 	}
 
 	mbhc_calibration = def_wcd_mbhc_cal();
 	if (!mbhc_calibration)
 		return -ENOMEM;
 	wcd_mbhc_cfg.calibration = mbhc_calibration;
-	ret = wcd938x_mbhc_hs_detect(component, &wcd_mbhc_cfg);
+
+	if (!is_wcd937x)
+		ret = wcd938x_mbhc_hs_detect(component, &wcd_mbhc_cfg);
+	else
+		ret = wcd937x_mbhc_hs_detect(component, &wcd_mbhc_cfg);
+
 	if (ret) {
 		dev_err(component->dev, "%s: mbhc hs detect failed, err:%d\n",
 			__func__, ret);
@@ -1455,6 +1509,16 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev, int w
 			       msm_wcn_be_dai_links,
 			       sizeof(msm_wcn_be_dai_links));
 			total_links += ARRAY_SIZE(msm_wcn_be_dai_links);
+		}
+
+		rc = of_property_read_u32(dev->of_node, "qcom,wcn-btfm", &val);
+		if (!rc && val) {
+			dev_dbg(dev, "%s(): WCN BT FM support present\n",
+				__func__);
+			memcpy(msm_waipio_dai_links + total_links,
+			       msm_wcn_btfm_be_dai_links,
+			       sizeof(msm_wcn_btfm_be_dai_links));
+			total_links += ARRAY_SIZE(msm_wcn_btfm_be_dai_links);
 		}
 
 		dailink = msm_waipio_dai_links;
@@ -1598,7 +1662,6 @@ static int msm_rx_tx_codec_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "Analog Mic4");
 	snd_soc_dapm_ignore_suspend(dapm, "Analog Mic5");
 
-	lpass_cdc_set_port_map(lpass_cdc_component, ARRAY_SIZE(sm_port_map), sm_port_map);
 
 	card = rtd->card->snd_card;
 	if (!pdata->codec_root) {
@@ -1619,9 +1682,11 @@ static int msm_rx_tx_codec_init(struct snd_soc_pcm_runtime *rtd)
 
 	component = snd_soc_rtdcom_lookup(rtd, WCD938X_DRV_NAME);
 	if (!component) {
-		pr_err("%s could not find component for %s\n",
-			__func__, WCD938X_DRV_NAME);
-		return -EINVAL;
+		component = snd_soc_rtdcom_lookup(rtd, WCD937X_DRV_NAME);
+		if (!component) {
+			pr_err("%s component is NULL\n", __func__);
+			return -EINVAL;
+		}
 	}
 	dapm = snd_soc_component_get_dapm(component);
 	card = component->card->snd_card;
@@ -1647,14 +1712,25 @@ static int msm_rx_tx_codec_init(struct snd_soc_pcm_runtime *rtd)
 		}
 		pdata->codec_root = entry;
 	}
-	wcd938x_info_create_codec_entry(pdata->codec_root, component);
+	if(!strncmp(component->driver->name, WCD937X_DRV_NAME,
+			strlen(WCD937X_DRV_NAME))){
+		wcd937x_info_create_codec_entry(pdata->codec_root, component);
+		codec_variant = wcd937x_get_codec_variant(component);
+		dev_dbg(component->dev, "%s: variant %d\n",__func__, codec_variant);
+		lpass_cdc_set_port_map(lpass_cdc_component,
+			ARRAY_SIZE(sm_port_map_wcd937x), sm_port_map_wcd937x);
+	} else {
+		wcd938x_info_create_codec_entry(pdata->codec_root, component);
+		codec_variant = wcd938x_get_codec_variant(component);
+		dev_dbg(component->dev, "%s: variant %d\n", __func__, codec_variant);
+		lpass_cdc_set_port_map(lpass_cdc_component, ARRAY_SIZE(sm_port_map), sm_port_map);
 
-	codec_variant = wcd938x_get_codec_variant(component);
-	dev_dbg(component->dev, "%s: variant %d\n", __func__, codec_variant);
-	if (codec_variant == WCD9385)
-		ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, true);
-	else
-		ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, false);
+		/* check if the variant is wcd9385 and set RX HIFI filter capability */
+		if (codec_variant == WCD9385)
+			ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, true);
+		else
+			ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, false);
+	}
 
 	if (ret < 0) {
 		dev_err(component->dev, "%s: set fir capability failed: %d\n",
@@ -1817,6 +1893,49 @@ void msm_common_set_pdata(struct snd_soc_card *card,
 	pdata->common_pdata = common_pdata;
 }
 
+static int msm_asoc_parse_soundcard_name(struct platform_device *pdev,
+					 struct snd_soc_card *card)
+{
+	struct nvmem_cell *cell = NULL;
+	size_t len = 0;
+	u32 *buf = NULL;
+	u32 adsp_var_idx = 0;
+	int ret = 0;
+
+	/* get adsp variant idx */
+	cell = nvmem_cell_get(&pdev->dev, "adsp_variant");
+	if (IS_ERR_OR_NULL(cell)) {
+		dev_dbg(&pdev->dev, "%s: FAILED to get nvmem cell \n", __func__);
+		goto parse;
+	}
+	buf = nvmem_cell_read(cell, &len);
+	nvmem_cell_put(cell);
+	if (IS_ERR_OR_NULL(buf)) {
+		dev_dbg(&pdev->dev, "%s: FAILED to read nvmem cell \n", __func__);
+		goto parse;
+	}
+	if (len <= 0 || len > sizeof(u32)) {
+		dev_dbg(&pdev->dev, "%s: nvmem cell length out of range: %d\n",
+			__func__, len);
+		kfree(buf);
+		goto parse;
+	}
+	memcpy(&adsp_var_idx, buf, len);
+	kfree(buf);
+
+parse:
+	if(adsp_var_idx)
+		ret = snd_soc_of_parse_card_name(card, "qcom,sku-model");
+	else
+		ret = snd_soc_of_parse_card_name(card, "qcom,model");
+
+	if (ret)
+		dev_err(&pdev->dev, "%s: parse card name failed, err:%d\n",
+			__func__, ret);
+
+	return ret;
+}
+
 static int msm_asoc_machine_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = NULL;
@@ -1858,9 +1977,9 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, card);
 	snd_soc_card_set_drvdata(card, pdata);
 
-	ret = snd_soc_of_parse_card_name(card, "qcom,model");
+	ret = msm_asoc_parse_soundcard_name(pdev, card);
 	if (ret) {
-		dev_err(&pdev->dev, "%s: parse card name failed, err:%d\n",
+		dev_err(&pdev->dev, "%s: parse soundcard name failed, err:%d\n",
 			__func__, ret);
 		goto err;
 	}
@@ -1878,13 +1997,13 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	/* parse upd configuration */
-	msm_parse_upd_configuration(pdev, pdata);
-
-#if IS_ENABLED(CONFIG_ARCH_SONY_NAGARA)
+#ifndef ENABLE_WSA
 	card->codec_conf = msm_codec_conf;
 	card->num_configs = sizeof(msm_codec_conf) / sizeof(msm_codec_conf[0]);
 #endif
+
+	/* parse upd configuration */
+	msm_parse_upd_configuration(pdev, pdata);
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret == -EPROBE_DEFER) {
