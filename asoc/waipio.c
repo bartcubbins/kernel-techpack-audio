@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -951,39 +951,6 @@ static struct snd_soc_dai_link msm_va_cdc_dma_be_dai_links[] = {
 	},
 };
 
-#ifndef ENABLE_WSA
-static int cs35l41_init(struct snd_soc_pcm_runtime *rtd)
-{
-	struct snd_soc_dai **dais = rtd->dais;
-	struct snd_soc_dapm_context *dapm;
-	int i;
-
-	for (i = rtd->num_cpus; i < (rtd->num_cpus + rtd->num_codecs); i++) {
-
-		dapm = snd_soc_component_get_dapm(dais[i]->component);
-		if (dapm->component->name_prefix == NULL) {
-			pr_debug("%s: name_prefix=NULL\n", __func__);
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Playback");
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Capture");
-			snd_soc_dapm_ignore_suspend(dapm, "SPK");
-		} else if (!strcmp(dapm->component->name_prefix, "L")) {
-			pr_debug("%s: name_prefix=L\n", __func__);
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Playback");
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Capture");
-			snd_soc_dapm_ignore_suspend(dapm, "SPK");
-		} else if (!strcmp(dapm->component->name_prefix, "R")) {
-			pr_debug("%s: name_prefix=R\n", __func__);
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Playback");
-			snd_soc_dapm_ignore_suspend(dapm, "AMP Capture");
-			snd_soc_dapm_ignore_suspend(dapm, "SPK");
-		}
-	}
-	snd_soc_dapm_sync(dapm);
-
-	return 0;
-}
-#endif
-
 /*
  * I2S interface pinctrl mapping
  * ------------------------------------
@@ -1111,9 +1078,6 @@ static struct snd_soc_dai_link msm_mi2s_dai_links[] = {
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
 		SND_SOC_DAILINK_REG(sen_mi2s_rx),
-#ifndef ENABLE_WSA
-		.init = &cs35l41_init,
-#endif
 	},
 	{
 		.name = LPASS_BE_SEN_MI2S_TX,
@@ -1269,22 +1233,6 @@ static struct snd_soc_dai_link msm_waipio_dai_links[
 			ARRAY_SIZE(msm_mi2s_dai_links) +
 			ARRAY_SIZE(msm_tdm_dai_links)];
 
-#ifndef ENABLE_WSA
-static struct snd_soc_codec_conf msm_codec_conf[] = {
-	{
-		.dlc.name = NULL,
-		.dlc.of_node = NULL,
-		.dlc.dai_name = NULL,
-		.name_prefix = "L",
-	},
-	{
-		.dlc.name = NULL,
-		.dlc.of_node = NULL,
-		.dlc.dai_name = NULL,
-		.name_prefix = "R",
-	},
-};
-#endif
 
 static int msm_populate_dai_link_component_of_node(
 					struct snd_soc_card *card)
@@ -1327,17 +1275,6 @@ static int msm_populate_dai_link_component_of_node(
 					ret = -ENODEV;
 					goto err;
 				}
-
-#ifndef ENABLE_WSA
-				if (strcmp(dai_link[i].codecs[j].name, "cs35l41_l") == 0) {
-					/*Left speaker*/
-					msm_codec_conf[0].dlc.of_node = np;
-				} else if (strcmp(dai_link[i].codecs[j].name, "cs35l41_r") == 0) {
-					/*Right speaker*/
-					msm_codec_conf[1].dlc.of_node = np;
-				}
-#endif
-
 				dai_link[i].codecs[j].of_node = np;
 				dai_link[i].codecs[j].name = NULL;
 			}
@@ -1461,9 +1398,6 @@ static int msm_snd_card_late_probe(struct snd_soc_card *card)
 		dev_err(card->dev, "%s: asoc mach data is null!\n", __func__);
 		return -EINVAL;
 	}
-
-	if (pdata->wcd_disabled)
-		return 0;
 
 	if (pdata->wsa_hac_enabled)
 		return 0;
@@ -1986,11 +1920,8 @@ static int msm_rx_tx_codec_init(struct snd_soc_pcm_runtime *rtd)
 	lpass_cdc_info_create_codec_entry(pdata->codec_root, lpass_cdc_component);
 	lpass_cdc_register_wake_irq(lpass_cdc_component, false);
 
-	if (pdata->wcd_disabled) {
-		lpass_cdc_set_port_map(lpass_cdc_component,
-			ARRAY_SIZE(sm_port_map_tx_plus_wsa), sm_port_map_tx_plus_wsa);
+	if (pdata->wcd_disabled)
 		goto done;
-	}
 
 	component = snd_soc_rtdcom_lookup(rtd, WCD938X_DRV_NAME);
 	if (!component) {
@@ -2029,25 +1960,26 @@ static int msm_rx_tx_codec_init(struct snd_soc_pcm_runtime *rtd)
 		wcd937x_info_create_codec_entry(pdata->codec_root, component);
 		codec_variant = wcd937x_get_codec_variant(component);
 		dev_dbg(component->dev, "%s: variant %d\n",__func__, codec_variant);
+		lpass_cdc_set_port_map(lpass_cdc_component,
+			ARRAY_SIZE(sm_port_map_wcd937x), sm_port_map_wcd937x);
 	} else {
 		wcd938x_info_create_codec_entry(pdata->codec_root, component);
 		codec_variant = wcd938x_get_codec_variant(component);
 		dev_dbg(component->dev, "%s: variant %d\n", __func__, codec_variant);
+		lpass_cdc_set_port_map(lpass_cdc_component, ARRAY_SIZE(sm_port_map), sm_port_map);
 
 		/* check if the variant is wcd9385 and set RX HIFI filter capability */
 		if (codec_variant == WCD9385)
 			ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, true);
 		else
 			ret = lpass_cdc_rx_set_fir_capability(lpass_cdc_component, false);
-
-		if (ret < 0) {
-			dev_err(component->dev, "%s: set fir capability failed: %d\n",
-				__func__, ret);
-			return ret;
-		}
 	}
-	lpass_cdc_set_port_map(lpass_cdc_component, ARRAY_SIZE(sm_port_map), sm_port_map);
 
+	if (ret < 0) {
+		dev_err(component->dev, "%s: set fir capability failed: %d\n",
+			__func__, ret);
+		return ret;
+	}
 done:
 	codec_reg_done = true;
 	msm_common_dai_link_init(rtd);
@@ -2328,11 +2260,6 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 		ret = -EPROBE_DEFER;
 		goto err;
 	}
-
-#ifndef ENABLE_WSA
-	card->codec_conf = msm_codec_conf;
-	card->num_configs = sizeof(msm_codec_conf) / sizeof(msm_codec_conf[0]);
-#endif
 
 	/* parse upd configuration */
 	msm_parse_upd_configuration(pdev, pdata);
